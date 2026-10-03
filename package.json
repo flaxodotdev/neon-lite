@@ -1,13 +1,23 @@
 {
   "name": "neon-lite",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "A tiny local Neon-shaped SQLite development server",
   "license": "MIT",
-  "engines": { "node": ">=20" },
-  "bin": { "neon-lite": "dist/cli.js" },
-  "files": ["dist", "README.md", "LICENSE"],
-  "publishConfig": { "access": "public" },
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "neon-lite": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "dev": "node --import tsx --watch src/index.ts",
     "start": "node --import tsx src/index.ts",

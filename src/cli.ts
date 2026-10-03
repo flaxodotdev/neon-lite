@@ -2,8 +2,9 @@
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
+import { findAvailablePort } from './services/ports.js';
 
-const VERSION = '0.1.0';
+const VERSION = '0.1.1';
 const OWNER_ID = 'neon-lite-local-cli';
 
 async function main(args: string[]) {
@@ -19,8 +20,11 @@ async function main(args: string[]) {
     const { createApiKey } = await import('./services/keys.js');
     const project = createProject(OWNER_ID, name);
     const key = createApiKey(OWNER_ID, `${name} local key`);
-    printProject(project, key.key, command === 'init');
-    if (command === 'init') await startServer(rest);
+    if (command === 'init') {
+      await startServer(rest, (port) => printProject(project, key.key, true, port));
+    } else {
+      printProject(project, key.key, false, portFromArgs(rest));
+    }
     return;
   }
   if (command === 'projects' || command === 'list') {
@@ -43,8 +47,8 @@ function configureDataDirectory(args: string[]) {
   mkdirSync(process.env.DATA_DIR, { recursive: true });
 }
 
-function printProject(project: { id: string; name: string; branches: { id: string; name: string }[] }, key: string, startsServer: boolean) {
-  const base = process.env.BASE_URL ?? `http://localhost:${portFromArgs(process.argv.slice(2))}`;
+function printProject(project: { id: string; name: string; branches: { id: string; name: string }[] }, key: string, startsServer: boolean, port: number) {
+  const base = process.env.BASE_URL ?? `http://localhost:${port}`;
   console.log(`Created local project: ${project.name}`);
   console.log(`Project ID: ${project.id}`);
   console.log(`Branch: ${project.branches[0]?.name}`);
@@ -53,17 +57,26 @@ function printProject(project: { id: string; name: string; branches: { id: strin
   console.log(startsServer ? '\nStarting the local API now…' : '\nStart the local API with: neon-lite start');
 }
 
-async function startServer(args: string[]) {
-  const port = portFromArgs(args);
+async function startServer(args: string[], onReady?: (port: number) => void) {
+  const requestedPort = portFromArgs(args);
+  const port = await findAvailablePort(requestedPort);
+  if (port !== requestedPort) console.log(`Port ${requestedPort} is already in use. Using port ${port}.`);
   process.env.PORT = String(port);
   process.env.BASE_URL ??= `http://localhost:${port}`;
   const [{ app }, { serve }] = await Promise.all([
     import('./app.js'),
     import('@hono/node-server'),
   ]);
-  serve({ fetch: app.fetch, port, hostname: '127.0.0.1' }, (info) => {
+  const server = serve({ fetch: app.fetch, port, hostname: '127.0.0.1' }, (info) => {
+    onReady?.(info.port);
     console.log(`Neon Lite is ready at http://localhost:${info.port}`);
     console.log(`Data directory: ${process.env.DATA_DIR}`);
+  });
+  server.once('error', (error: NodeJS.ErrnoException) => {
+    console.error(error.code === 'EADDRINUSE'
+      ? `Port ${port} became occupied before Neon Lite could start. Retry the command.`
+      : `Could not start Neon Lite: ${error.message}`);
+    process.exitCode = 1;
   });
 }
 

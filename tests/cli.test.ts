@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { findAvailablePort } from '../src/services/ports.js';
 
 test('CLI creates multiple projects and lists them from persistent local storage', async () => {
   const dataDir = await mkdtemp(join(tmpdir(), 'neon-lite-cli-'));
@@ -29,4 +30,11 @@ test('CLI creates multiple projects and lists them from persistent local storage
   } finally {
     await rm(dataDir, { recursive: true, force: true });
   }
+});
+
+test('port selection skips ports that are already occupied', async () => {
+  const occupied = new Set([8787, 8788]);
+  const port = await findAvailablePort(8787, async (candidate) => !occupied.has(candidate));
+  assert.equal(port, 8789);
+  await assert.rejects(findAvailablePort(65535, async () => false), /No available port found/);
 });
