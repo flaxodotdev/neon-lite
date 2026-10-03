@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { findAvailablePort } from './services/ports.js';
 
-const VERSION = '0.1.1';
+const VERSION = '0.1.2';
 const OWNER_ID = 'neon-lite-local-cli';
 
 async function main(args: string[]) {
