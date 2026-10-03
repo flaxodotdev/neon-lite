@@ -1,0 +1,20 @@
+import { Hono } from 'hono';
+import { auth } from './auth/auth.js';
+import { requireIdentity, type AppEnv } from './auth/identity.js';
+import { control } from './routes/control.js';
+import { sql } from './routes/sql.js';
+import { storage } from './routes/storage.js';
+import { functions } from './routes/functions.js';
+
+export const app = new Hono<AppEnv>();
+app.get('/health', (c) => c.json({ status: 'ok', name: 'neon-lite' }));
+app.on(['GET', 'POST'], '/api/auth/*', (c) => auth.handler(c.req.raw));
+app.use('/api/v2/*', requireIdentity);
+app.use('/sql/*', requireIdentity);
+app.use('/storage/*', requireIdentity);
+app.use('/functions/*', requireIdentity);
+app.route('/api/v2', control);
+app.route('/sql', sql);
+app.route('/storage', storage);
+app.route('/functions', functions);
+app.notFound((c) => c.json({ error: 'Not found' }, 404));

@@ -1,0 +1,22 @@
+# Dependencies and compiled output
+node_modules/
+dist/
+coverage/
+
+# Local databases, uploaded objects, and runtime state
+data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Local secrets and environment overrides
+.env
+.env.*
+!.env.example
+.npmrc
+
+# Local tooling and generated archives
+.DS_Store
+*.log
+*.tgz
+npm-debug.log*
