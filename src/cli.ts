@@ -5,7 +5,7 @@ import { mkdirSync } from 'node:fs';
 import { findAvailablePort } from './services/ports.js';
 import { getBranchSocket, startAllBranchSockets, stopBranchRuntime } from './db/branch-runtime.js';
 
-const VERSION = '0.2.0';
+const VERSION = '0.2.1';
 const OWNER_ID = 'neon-lite-local-cli';
 
 async function main(args: string[]) {
@@ -72,7 +72,11 @@ async function startServer(args: string[], onReady?: (port: number) => void) {
     import('./app.js'),
     import('@hono/node-server'),
   ]);
-  await startAllBranchSockets();
+  console.log('Starting local Postgres branches. The first start can take a little while while PGlite initializes.');
+  const existingBranches = await startAllBranchSockets();
+  if (existingBranches.failed > 0) {
+    console.warn(`Warning: ${existingBranches.failed} of ${existingBranches.total} saved Postgres endpoints did not start. Their HTTP SQL endpoints may still work.`);
+  }
   const server = serve({ fetch: app.fetch, port, hostname: '127.0.0.1' }, (info) => {
     Promise.resolve(onReady?.(info.port)).then(() => {
       console.log(`Neon Lite is ready at http://localhost:${info.port}`);

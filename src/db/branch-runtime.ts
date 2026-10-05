@@ -42,10 +42,15 @@ export async function getBranchSocket(branchId: string) {
 
 export async function startAllBranchSockets() {
   const branches = meta.prepare('SELECT id FROM branches ORDER BY created_at').all() as { id: string }[];
+  let failed = 0;
   for (const branch of branches) {
     try { await getBranchSocket(branch.id); }
-    catch (error) { console.error(`Could not start Postgres endpoint for branch ${branch.id}:`, error); }
+    catch (error) {
+      failed += 1;
+      console.error(`Could not start Postgres endpoint for branch ${branch.id}:`, error);
+    }
   }
+  return { total: branches.length, failed };
 }
 
 export async function stopBranchRuntime() {
