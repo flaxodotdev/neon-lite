@@ -1,20 +1,23 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Client } from 'pg';
+import Database from 'better-sqlite3';
 
 const dir = await mkdtemp(join(tmpdir(), 'neon-lite-test-'));
 process.env.DATA_DIR = dir;
 process.env.BASE_URL = 'http://localhost:8787';
 process.env.BETTER_AUTH_SECRET = 'test-secret-that-is-long-enough-for-better-auth';
 const { app } = await import('../src/app.js');
+const { getBranchSocket, stopBranchRuntime } = await import('../src/db/branch-runtime.js');
 async function expectStatus(response: Response, status: number) {
   assert.equal(response.status, status, await response.clone().text());
 }
 const json = (response: Response) => response.json() as Promise<Record<string, any>>;
 
- test('smoke: auth, key management, projects, branches, SQL, storage and functions', async () => {
+test('smoke: auth, key management, projects, branches, Postgres SQL and wire protocol, storage and functions', async () => {
   try {
     const health = await app.request('/health');
     assert.equal(health.status, 200);
@@ -44,14 +47,21 @@ const json = (response: Response) => response.json() as Promise<Record<string, a
 
     const query = await app.request(`/sql/${branchId}`, { method: 'POST', headers: authHeaders, body: JSON.stringify({ query: 'CREATE TABLE sample (id INTEGER, value TEXT)' }) });
     await expectStatus(query, 200);
-    const insert = await app.request(`/sql/${branchId}`, { method: 'POST', headers: authHeaders, body: JSON.stringify({ query: 'INSERT INTO sample VALUES (?, ?)', params: [1, 'works'] }) });
+    const insert = await app.request(`/sql/${branchId}`, { method: 'POST', headers: authHeaders, body: JSON.stringify({ query: 'INSERT INTO sample VALUES ($1, $2)', params: [1, 'works'] }) });
     assert.deepEqual(await json(insert), []);
     const select = await app.request(`/sql/${branchId}?neon_lite_meta=true`, { method: 'POST', headers: authHeaders, body: JSON.stringify({ query: 'SELECT * FROM sample' }) });
     assert.deepEqual((await json(select)).rows, [{ id: 1, value: 'works' }]);
 
     const newBranch = await app.request(`/api/v2/projects/${project.id}/branches`, { method: 'POST', headers: authHeaders, body: JSON.stringify({ branch: { name: 'preview' } }) });
     await expectStatus(newBranch, 201);
-    assert.equal((await app.request(`/api/v2/projects/${project.id}/endpoints`, { headers: { authorization: `Bearer ${key}` } })).status, 200);
+    const socket = await getBranchSocket(branchId);
+    const endpoint = { connection_uri: socket.connectionString };
+    assert.match(endpoint.connection_uri, /^postgresql:\/\/postgres:postgres@127\.0\.0\.1:\d+\/postgres/);
+    const pgClient = new Client({ connectionString: endpoint.connection_uri });
+    await pgClient.connect();
+    const wireResult = await pgClient.query('SELECT value FROM sample WHERE id = $1', [1]);
+    assert.deepEqual(wireResult.rows, [{ value: 'works' }]);
+    await pgClient.end();
     const copied = await app.request(`/sql/${(await json(newBranch)).branch.id}`, { method: 'POST', headers: authHeaders, body: JSON.stringify({ query: 'SELECT * FROM sample' }) });
     assert.deepEqual(await json(copied), [{ id: 1, value: 'works' }]);
 
@@ -79,6 +89,29 @@ const json = (response: Response) => response.json() as Promise<Record<string, a
     assert.equal(revoke.status, 204);
     assert.equal((await app.request('/api/v2/projects', { headers: { authorization: `Bearer ${key}` } })).status, 401);
   } finally {
+    await stopBranchRuntime();
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test('existing SQLite branch data is imported on first query', async () => {
+  const legacyFile = join(dir, 'legacy.sqlite');
+  await mkdir(dir, { recursive: true });
+  const legacy = new Database(legacyFile);
+  legacy.exec('CREATE TABLE old_items (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL); INSERT INTO old_items (label) VALUES (\'kept\')');
+  legacy.close();
+  const ownerId = 'legacy-owner';
+  const projectId = 'legacy-project';
+  const branchId = 'legacy-branch';
+  const now = new Date().toISOString();
+  const { meta } = await import('../src/db/meta.js');
+  meta.prepare('INSERT INTO projects VALUES (?, ?, ?, ?)').run(projectId, ownerId, 'legacy', now);
+  meta.prepare("INSERT INTO branches (id, project_id, name, db_file, created_at, db_kind) VALUES (?, ?, 'main', ?, ?, 'sqlite')").run(branchId, projectId, legacyFile, now);
+  const { queryBranch } = await import('../src/db/branch-runtime.js');
+  const migrated = await queryBranch(branchId, 'SELECT * FROM old_items');
+  assert.deepEqual(migrated.rows, [{ id: 1, label: 'kept' }]);
+  await queryBranch(branchId, "INSERT INTO old_items (label) VALUES ('second')");
+  const rows = await queryBranch(branchId, 'SELECT * FROM old_items ORDER BY id');
+  assert.deepEqual(rows.rows, [{ id: 1, label: 'kept' }, { id: 2, label: 'second' }]);
+  assert.equal(meta.prepare('SELECT db_kind FROM branches WHERE id = ?').get(branchId) && (meta.prepare('SELECT db_kind FROM branches WHERE id = ?').get(branchId) as { db_kind: string }).db_kind, 'pglite');
 });

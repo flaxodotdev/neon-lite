@@ -1,31 +1,41 @@
-import Database from 'better-sqlite3';
-import { existsSync, copyFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { mkdir } from 'node:fs/promises';
 import { nanoid } from 'nanoid';
 import { dataDir, meta } from '../db/meta.js';
+import { createSnapshotBranch, getBranchDatabase } from '../db/branch-runtime.js';
 
-export function createProject(ownerId: string, name: string) {
+export async function createProject(ownerId: string, name: string) {
   const id = nanoid();
   const branchId = nanoid();
-  const dbFile = join(dataDir, `${branchId}.sqlite`);
+  const dbFile = join(dataDir, 'branches', branchId);
+  await mkdir(join(dataDir, 'branches'), { recursive: true });
   const now = new Date().toISOString();
   const tx = meta.transaction(() => {
     meta.prepare('INSERT INTO projects VALUES (?, ?, ?, ?)').run(id, ownerId, name, now);
-    meta.prepare('INSERT INTO branches VALUES (?, ?, ?, ?, ?)').run(branchId, id, 'main', dbFile, now);
+    meta.prepare("INSERT INTO branches (id, project_id, name, db_file, created_at, db_kind) VALUES (?, ?, 'main', ?, ?, 'pglite')").run(branchId, id, dbFile, now);
   });
   tx();
-  new Database(dbFile).close();
+  try { await getBranchDatabase(branchId); }
+  catch (error) {
+    meta.prepare('DELETE FROM projects WHERE id = ?').run(id);
+    throw error;
+  }
   return { id, name, created_at: now, branches: [{ id: branchId, name: 'main' }] };
 }
-export function createBranch(ownerId: string, projectId: string, name: string) {
-  const source = meta.prepare('SELECT db_file FROM branches WHERE project_id = ? AND name = ? AND project_id IN (SELECT id FROM projects WHERE owner_id = ?)').get(projectId, 'main', ownerId) as { db_file: string } | undefined;
+export async function createBranch(ownerId: string, projectId: string, name: string) {
+  const source = meta.prepare('SELECT id FROM branches WHERE project_id = ? AND name = ? AND project_id IN (SELECT id FROM projects WHERE owner_id = ?)').get(projectId, 'main', ownerId) as { id: string } | undefined;
   if (!source) return null;
   const id = nanoid();
-  const dbFile = join(dataDir, `${id}.sqlite`);
-  if (existsSync(source.db_file)) copyFileSync(source.db_file, dbFile);
-  new Database(dbFile).close();
+  const dbFile = join(dataDir, 'branches', id);
+  await mkdir(join(dataDir, 'branches'), { recursive: true });
+  const snapshot = await (await getBranchDatabase(source.id)).dumpDataDir('none');
   const createdAt = new Date().toISOString();
-  meta.prepare('INSERT INTO branches VALUES (?, ?, ?, ?, ?)').run(id, projectId, name, dbFile, createdAt);
+  meta.prepare("INSERT INTO branches (id, project_id, name, db_file, created_at, db_kind) VALUES (?, ?, ?, ?, ?, 'pglite')").run(id, projectId, name, dbFile, createdAt);
+  try { await createSnapshotBranch(id, dbFile, snapshot); }
+  catch (error) {
+    meta.prepare('DELETE FROM branches WHERE id = ?').run(id);
+    throw error;
+  }
   return { id, project_id: projectId, name, created_at: createdAt };
 }
 export function getBranch(projectId: string, branchId: string) {

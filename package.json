@@ -1,8 +1,8 @@
 {
   "name": "neon-lite",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "type": "module",
-  "description": "A tiny local Neon-shaped SQLite development server",
+  "description": "A lightweight local Neon-compatible Postgres development server powered by PGlite",
   "license": "MIT",
   "engines": {
     "node": ">=20"
@@ -27,6 +27,8 @@
     "test": "node --import tsx --test tests/*.test.ts"
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@electric-sql/pglite-socket": "^0.2.11",
     "@hono/node-server": "^1.13.8",
     "better-auth": "^1.2.12",
     "better-sqlite3": "^12.5.0",
@@ -36,6 +38,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.13.10",
+    "pg": "^8.23.1",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2"
   },

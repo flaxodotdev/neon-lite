@@ -16,6 +16,7 @@ meta.exec(`
   CREATE TABLE IF NOT EXISTS branches (
     id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     name TEXT NOT NULL, db_file TEXT NOT NULL, created_at TEXT NOT NULL,
+    db_kind TEXT NOT NULL DEFAULT 'pglite', pg_port INTEGER,
     UNIQUE(project_id, name)
   );
   CREATE TABLE IF NOT EXISTS api_keys (
@@ -28,3 +29,12 @@ meta.exec(`
     UNIQUE(project_id, name)
   );
 `);
+
+const branchColumns = meta.prepare('PRAGMA table_info(branches)').all() as { name: string }[];
+if (!branchColumns.some((column) => column.name === 'db_kind')) {
+  // Old releases stored branch databases as SQLite files.
+  meta.exec("ALTER TABLE branches ADD COLUMN db_kind TEXT NOT NULL DEFAULT 'sqlite'");
+}
+if (!branchColumns.some((column) => column.name === 'pg_port')) {
+  meta.exec('ALTER TABLE branches ADD COLUMN pg_port INTEGER');
+}
